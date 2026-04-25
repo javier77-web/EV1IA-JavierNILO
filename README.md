@@ -25,7 +25,7 @@ embeddings (vectores)
       ↓
 chroma db (base vectorial)
       ↓
-retriever (busqueda semantica)
+rag manual (busqueda semantica)
       ↓
 prompt + pregunta
       ↓
