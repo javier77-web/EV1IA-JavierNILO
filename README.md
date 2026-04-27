@@ -166,13 +166,5 @@ http://localhost:8501
 * openai (via github models)
 * streamlit
 
----
-
-# ⚠️ Notas importantes
-
-* no subir archivo `.env` al repositorio
-* el sistema usa RAG manual (sin RetrievalQA)
-* los documentos deben estar en la misma carpeta (`files/`)
-
 
 
