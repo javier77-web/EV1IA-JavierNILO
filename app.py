@@ -1,159 +1,211 @@
+"""
+app.py — Interfaz web del Agente Starken
+Conecta la UI Streamlit con el AgentExecutor de LangChain.
+"""
+
 import os
 from dotenv import load_dotenv
 import streamlit as st
-from langchain_community.document_loaders import TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_community.vectorstores import Chroma
-from langchain_core.prompts import PromptTemplate
 
-# configuracion basica de la pagina
+# CONFIGURACION DE PAGINA (DEBE IR PRIMERO)
 st.set_page_config(
     page_title="Asistente Starken",
     page_icon="📦",
     layout="centered"
 )
 
-# cargo variables del .env
+# CARGAR VARIABLES DE ENTORNO
 load_dotenv()
 
-# obtengo token
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-
 if not GITHUB_TOKEN:
-    raise ValueError("falta el GITHUB_TOKEN en el archivo .env")
+    st.error("❌ Falta el GITHUB_TOKEN en el archivo .env")
+    st.stop()
 
-# configuro entorno para usar github models
 os.environ["OPENAI_API_KEY"] = GITHUB_TOKEN
 os.environ["OPENAI_API_BASE"] = "https://models.inference.ai.azure.com"
 
-# funcion que inicializa todo (se ejecuta una vez)
+# INICIALIZACION DEL AGENTE (una sola vez)
 @st.cache_resource
-def inicializar_agente():
+def inicializar_sistema():
+    """
+    Inicializa la base de conocimiento y el agente.
+    Se ejecuta solo una vez gracias a cache_resource.
+    """
+    from memory import inicializar_base_conocimiento, recuperar_contexto_largo_plazo
+    from agent import crear_agente
 
-    # lista de documentos
-    documentos = []
-
-    # ruta donde estan los txt (misma carpeta)
     ruta_data = os.path.dirname(__file__)
 
-    # cargar archivos txt
-    for archivo in os.listdir(ruta_data):
-        if archivo.endswith(".txt"):
-            loader = TextLoader(os.path.join(ruta_data, archivo), encoding="utf-8")
-            documentos.extend(loader.load())
+    # 1. indexar documentos en ChromaDB
+    inicializar_base_conocimiento(ruta_data)
 
-    # dividir en chunks
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50
-    )
-    chunks = splitter.split_documents(documentos)
+    # 2. recuperar contexto de largo plazo (sesiones anteriores)
+    contexto_lp = recuperar_contexto_largo_plazo("historial de conversaciones", k=2)
 
-    # crear embeddings
-    embeddings = OpenAIEmbeddings(
-        model="text-embedding-3-small",
-        openai_api_base="https://models.inference.ai.azure.com",
-        openai_api_key=GITHUB_TOKEN
-    )
+    # 3. crear agente con ese contexto
+    executor = crear_agente(contexto_largo_plazo=contexto_lp)
 
-    # guardar en chroma
-    vector_store = Chroma.from_documents(chunks, embedding=embeddings)
-
-    # prompt del asistente
-    prompt_template = """Eres un asistente virtual de Starken.
-Responde SOLO con la informacion del contexto.
-Si no sabes responde: no tengo esa informacion.
-
-Contexto:
-{context}
-
-Pregunta:
-{question}
-
-Respuesta:"""
-
-    PROMPT = PromptTemplate(
-        template=prompt_template,
-        input_variables=["context", "question"]
-    )
-
-    # modelo de lenguaje
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0,
-        openai_api_base="https://models.inference.ai.azure.com",
-        openai_api_key=GITHUB_TOKEN
-    )
-
-    # retriever (buscador)
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-
-    return retriever, llm, PROMPT
+    return executor
 
 
-# interfaz
+# ESTILOS CSS
+st.markdown("""
+<style>
+    /* badge de herramienta */
+    .tool-badge {
+        display: inline-block;
+        background: #e8f4f8;
+        color: #1a6b8a;
+        border: 1px solid #b3d9e8;
+        border-radius: 12px;
+        padding: 2px 10px;
+        font-size: 0.75rem;
+        margin-right: 4px;
+        font-family: monospace;
+    }
+    /* contenedor de fuentes */
+    .sources-container {
+        background: #f8f9fa;
+        border-left: 3px solid #e63946;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        margin-top: 6px;
+        color: #555;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# INTERFAZ PRINCIPAL
 st.title("📦 Asistente Virtual Starken")
-st.caption("consulta sobre envios, tarifas y reclamos")
+st.caption("Agente inteligente · consultas, tarifas y reclamos")
 
-# historial
+# barra lateral: info del sistema 
+with st.sidebar:
+    st.markdown("### 🤖 Sobre este agente")
+    st.markdown("""
+**Herramientas disponibles:**
+- 🔍 `buscar_informacion` — políticas y procedimientos
+- 💰 `calcular_tarifa` — costos de envío
+- 📋 `registrar_reclamo` — incidencias y problemas
+
+**Memoria:**
+- Corto plazo: últimos 5 turnos
+- Largo plazo: ChromaDB persistente
+
+**Modelo:** gpt-4o-mini (GitHub Models)
+    """)
+
+    st.divider()
+    st.markdown("**Ejemplos de preguntas:**")
+    ejemplos = [
+        "¿Cuánto cuesta enviar 5kg a Arica?",
+        "Mi paquete llegó dañado, ¿qué hago?",
+        "¿Cuánto demora un envío a regiones?",
+        "Quiero un envío express a Santiago",
+        "Mi paquete no llega hace 10 días",
+    ]
+    for ej in ejemplos:
+        if st.button(ej, use_container_width=True, key=f"ej_{ej[:15]}"):
+            st.session_state["pregunta_rapida"] = ej
+
+    st.divider()
+    if st.button("🗑️ Limpiar conversación", use_container_width=True):
+        st.session_state.mensajes = []
+        st.session_state.pop("agente", None)
+        st.cache_resource.clear()
+        st.rerun()
+
+# ESTADO DE SESION
 if "mensajes" not in st.session_state:
     st.session_state.mensajes = []
 
-# mostrar historial
+if "agente" not in st.session_state:
+    with st.spinner("⚙️ Inicializando agente..."):
+        st.session_state.agente = inicializar_sistema()
+
+# mostrar mensaje de bienvenida si no hay historial
+if not st.session_state.mensajes:
+    with st.chat_message("assistant"):
+        st.markdown(
+            "¡Hola! Soy el asistente virtual de **Starken** 📦\n\n"
+            "Puedo ayudarte con:\n"
+            "- 💰 Calcular el costo de tu envío\n"
+            "- 🔍 Consultar plazos y políticas de envío\n"
+            "- 📋 Registrar reclamos o incidencias\n\n"
+            "¿En qué te puedo ayudar hoy?"
+        )
+
+# mostrar historial de mensajes
 for msg in st.session_state.mensajes:
     with st.chat_message(msg["rol"]):
         st.markdown(msg["contenido"])
 
-# input usuario
-if pregunta := st.chat_input("¿en que puedo ayudarte?"):
+        # mostrar metadatos si existen (herramientas usadas)
+        if msg.get("herramientas"):
+            badges = "".join(
+                f'<span class="tool-badge">🔧 {t}</span>'
+                for t in msg["herramientas"]
+            )
+            st.markdown(f'<div style="margin-top:4px">{badges}</div>', unsafe_allow_html=True)
 
-    # guardar pregunta
+# PROCESAR PREGUNTA
+# manejar botones de ejemplo
+pregunta_input = st.session_state.pop("pregunta_rapida", None)
+
+# input del usuario
+if pregunta_chat := st.chat_input("¿En qué puedo ayudarte?"):
+    pregunta_input = pregunta_chat
+
+if pregunta_input:
+
+    # guardar y mostrar pregunta del usuario
     st.session_state.mensajes.append({
         "rol": "user",
-        "contenido": pregunta
+        "contenido": pregunta_input
     })
-
     with st.chat_message("user"):
-        st.markdown(pregunta)
+        st.markdown(pregunta_input)
 
-    # generar respuesta
+    # generar respuesta del agente
     with st.chat_message("assistant"):
-        with st.spinner("buscando informacion..."):
+        with st.spinner("Analizando y buscando información..."):
 
-            retriever, llm, PROMPT = inicializar_agente()
+            from agent import procesar_pregunta
+            from memory import guardar_en_memoria_larga, formatear_historial
 
-            # 1 buscar documentos
-            docs = retriever.invoke(pregunta)
-
-            # 2 crear contexto
-            contexto = "\n\n".join([doc.page_content for doc in docs])
-
-            # 3 armar prompt
-            prompt_final = PROMPT.format(
-                context=contexto,
-                question=pregunta
+            resultado = procesar_pregunta(
+                st.session_state.agente,
+                pregunta_input
             )
 
-            # 4 llamar modelo
-            respuesta_llm = llm.invoke(prompt_final)
-            respuesta = respuesta_llm.content
-
-            # obtener fuentes
-            fuentes = list(set([
-                os.path.basename(doc.metadata.get("source", ""))
-                for doc in docs
-            ]))
+            respuesta = resultado["respuesta"]
+            herramientas = resultado["herramientas_usadas"]
 
             # mostrar respuesta
             st.markdown(respuesta)
 
-            if fuentes:
-                st.caption(f"fuentes: {', '.join(fuentes)}")
+            # mostrar badges de herramientas usadas
+            if herramientas:
+                badges = "".join(
+                    f'<span class="tool-badge"> {t}</span>'
+                    for t in herramientas
+                )
+                st.markdown(
+                    f'<div style="margin-top:6px">{badges}</div>',
+                    unsafe_allow_html=True
+                )
 
-    # guardar respuesta
+    # guardar respuesta en historial
     st.session_state.mensajes.append({
         "rol": "assistant",
-        "contenido": respuesta
+        "contenido": respuesta,
+        "herramientas": herramientas
     })
 
+    # cada 5 intercambios, guardar resumen en memoria larga
+    if len(st.session_state.mensajes) % 10 == 0:
+        historial_texto = formatear_historial(st.session_state.mensajes[-10:])
+        resumen = f"Conversación con usuario: {historial_texto[:500]}"
+        guardar_en_memoria_larga(resumen, {"origen": "streamlit"})
