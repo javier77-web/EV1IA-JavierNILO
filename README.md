@@ -128,8 +128,6 @@ Desarrollo para escritorio con C++
 
 ```bash
 git clone https://github.com/javier77-web/EV1IA-JavierNILO.git
-
-cd EV1IA-JavierNILO/files
 ```
 
 ---
