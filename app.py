@@ -25,6 +25,10 @@ if not GITHUB_TOKEN:
 os.environ["OPENAI_API_KEY"] = GITHUB_TOKEN
 os.environ["OPENAI_API_BASE"] = "https://models.inference.ai.azure.com"
 
+# ── EV3: OBSERVABILIDAD ──────────────────────────────────────────
+from observability import MedidorEjecucion
+# ─────────────────────────────────────────────────────────────────
+
 # INICIALIZACION DEL AGENTE (una sola vez)
 @st.cache_resource
 def inicializar_sistema():
@@ -175,13 +179,21 @@ if pregunta_input:
             from agent import procesar_pregunta
             from memory import guardar_en_memoria_larga, formatear_historial
 
-            resultado = procesar_pregunta(
-                st.session_state.agente,
-                pregunta_input
-            )
-
-            respuesta = resultado["respuesta"]
-            herramientas = resultado["herramientas_usadas"]
+            # ── EV3: MEDICIÓN DE OBSERVABILIDAD ─────────────────
+            with MedidorEjecucion(pregunta=pregunta_input, herramienta="agente_completo") as m:
+                try:
+                    resultado = procesar_pregunta(
+                        st.session_state.agente,
+                        pregunta_input
+                    )
+                    respuesta = resultado["respuesta"]
+                    herramientas = resultado["herramientas_usadas"]
+                    m.set_respuesta(respuesta)
+                except Exception as e:
+                    respuesta = f"⚠️ Error al procesar la consulta: {e}"
+                    herramientas = []
+                    m.set_error(str(e))
+            # ─────────────────────────────────────────────────────
 
             # mostrar respuesta
             st.markdown(respuesta)

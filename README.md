@@ -1,86 +1,67 @@
-# 📦 Agente Funcional Starken — EV2
+# 📦 Asistente RAG — Starken (Proyecto IA)
 
 Proyecto desarrollado para la asignatura **ISY0101 — Ingeniería de Soluciones con IA (DuocUC)**.
 
-Este sistema implementa un **Agente Funcional basado en LangChain AgentExecutor** para responder consultas relacionadas con envíos, tarifas y reclamos de Starken.
+Este sistema implementa un **RAG (Retrieval-Augmented Generation)** para responder preguntas sobre envíos, tarifas y reclamos de Starken usando documentos locales.
 
 Incluye:
 
-* Backend del agente (AgentExecutor)
-* Sistema RAG con ChromaDB
-* Memoria de corto plazo
-* Memoria persistente de largo plazo
-* Interfaz web con Streamlit
+* Backend (agente LangChain con herramientas y memoria)
+* Interfaz web (Streamlit)
+* Dashboard de monitoreo (Streamlit multipage)
 * Base de conocimiento en archivos `.txt`
+* Sistema de métricas y logs automáticos
 
 ---
 
 # 🧠 ¿Cómo funciona?
 
-```text
-Usuario (Streamlit)
-        │
-        ▼
-   AgentExecutor
-        │
-        ├── Memoria corto plazo
-        │
-        ├── Memoria largo plazo
-        │
-        └── Herramientas
-              │
-              ├── buscar_informacion
-              ├── calcular_tarifa
-              └── registrar_reclamo
-                     │
-                     ▼
-                  ChromaDB
-                     │
-                     ▼
-                GPT-4o-mini
-                     │
-                     ▼
-                 Respuesta
 ```
-
----
-
-# 🔧 Herramientas disponibles
-
-| Herramienta        | Función                                                             |
-| ------------------ | ------------------------------------------------------------------- |
-| buscar_informacion | Busca información relevante en la base de conocimiento mediante RAG |
-| calcular_tarifa    | Calcula costos de envío según peso y destino                        |
-| registrar_reclamo  | Clasifica reclamos y entrega instrucciones al usuario               |
-
----
-
-# 🧠 Sistema de memoria
-
-### Memoria de corto plazo
-
-Permite mantener contexto durante la conversación actual utilizando el historial reciente de mensajes.
-
-### Memoria de largo plazo
-
-Almacena resúmenes de conversaciones en ChromaDB para recuperar información relevante entre distintas sesiones.
+documentos txt
+      ↓
+carga de documentos (loader)
+      ↓
+chunking (division en partes)
+      ↓
+embeddings (vectores)
+      ↓
+chroma db (base vectorial)
+      ↓
+agente langchain (tool-calling)
+      ├── buscar_informacion
+      ├── calcular_tarifa
+      └── registrar_reclamo
+      ↓
+observability.py (métricas y logs)
+      ↓
+modelo gpt-4o-mini
+      ↓
+respuesta al usuario
+```
 
 ---
 
 # 📂 Estructura del proyecto
 
-```text
+```
 files/
 │
-├── app.py
-├── agent.py
-├── tools.py
-├── memory.py
-├── rag_starken.py
-├── politica_envios.txt
-├── tarifario_faq.txt
+├── app.py                  # interfaz streamlit
+├── agent.py                # agente langchain con herramientas
+├── tools.py                # herramientas del agente
+├── memory.py               # memoria corto y largo plazo
+├── observability.py        # métricas, logs y trazabilidad
+├── rag_starken.py          # pipeline rag original (ev1)
+│
+├── pages/
+│   └── dashboard.py        # dashboard de observabilidad
+│
+├── logs/
+│   └── metricas.jsonl      # registro automático de ejecuciones
+│
+├── politica_envios.txt     # datos de prueba
+├── tarifario_faq.txt       # datos de prueba
 ├── requirements.txt
-├── .env
 ├── .gitignore
 └── README.md
 ```
@@ -89,62 +70,35 @@ files/
 
 # ⚙️ Requisitos
 
-* Python 3.13
+* Python 3.13 (IMPORTANTE, no usar 3.14)
 * pip
 * Git
-* Microsoft C++ Build Tools (Windows)
-
-> Se recomienda utilizar Python 3.13. Algunas dependencias aún presentan incompatibilidades con Python 3.14.
-
----
-
-# ⚠️ Requisito adicional para Windows
-
-ChromaDB requiere compilar ciertos componentes en C++.
-
-Antes de instalar dependencias:
-
-1. Descargar Visual C++ Build Tools:
-
-https://visualstudio.microsoft.com/visual-cpp-build-tools/
-
-2. Ejecutar el instalador.
-
-3. Seleccionar únicamente:
-
-```text
-Desarrollo para escritorio con C++
-```
-
-4. Completar la instalación.
-
-5. Reiniciar PowerShell.
+* Microsoft C++ Build Tools (requerido por ChromaDB en Windows)
 
 ---
 
 # 🚀 Instalación paso a paso
 
-## 1. Clonar repositorio
+## 1. clonar repositorio
 
 ```bash
 git clone https://github.com/javier77-web/EV1IA-JavierNILO.git
+cd EV1IA-JavierNILO/files
 ```
 
 ---
 
-## 2. Crear entorno virtual
+## 2. crear entorno virtual (recomendado)
 
-### Windows (PowerShell)
+### windows (powershell)
 
 ```powershell
 py -3.13 -m venv venv
-
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-
 .\venv\Scripts\Activate.ps1
 ```
 
-### Verificar versión
+### verificar version
 
 ```bash
 python --version
@@ -152,112 +106,94 @@ python --version
 
 Debe mostrar:
 
-```text
+```
 Python 3.13.x
 ```
 
 ---
 
-## 3. Instalar dependencias
+## 3. instalar dependencias
 
 ```bash
-pip install -r requirements.txt
+pip install --upgrade pip
+pip install streamlit
+pip install langchain==0.3.25
+pip install langchain-community==0.3.23
+pip install langchain-openai==0.3.16
+pip install langchain-core==0.3.86
+pip install langchain-text-splitters
+pip install chromadb==0.5.23
+pip install numpy==2.1.0
+pip install python-dotenv
 ```
-
-Si aparece un error relacionado con `chroma-hnswlib`, verificar que Microsoft C++ Build Tools se encuentre correctamente instalado.
 
 ---
 
-## 4. Configurar token (IMPORTANTE)
+## 4. configurar token (IMPORTANTE)
 
-Crear un archivo `.env` en la carpeta principal del proyecto:
+Crear archivo `.env` en la carpeta `files/`:
 
-```env
+```
 GITHUB_TOKEN=tu_token_aqui
 ```
 
-### Obtener token desde GitHub
-
-1. Ingresar a GitHub.
-2. Abrir Settings.
-3. Seleccionar Developer Settings.
-4. Ingresar a Personal Access Tokens.
-5. Crear un nuevo token.
-6. Copiar el token generado.
-7. Guardarlo dentro del archivo `.env`.
+👉 El token se obtiene desde GitHub:
+Settings → Developer settings → Personal access tokens
 
 ---
 
 # ▶️ Ejecución
 
-## 🔹 Opción 1: Pruebas del agente desde consola
+## 🔹 opción 1: backend (consola)
 
 ```bash
-python agent.py
+py -3.13 rag_starken.py
 ```
 
-Permite ejecutar casos de prueba automáticos para validar:
-
-* Uso de herramientas
-* Recuperación de información mediante RAG
-* Cálculo de tarifas
-* Registro de reclamos
-* Funcionamiento de la memoria
+Esto ejecuta pruebas automáticas del sistema RAG.
 
 ---
 
-## 🔹 Opción 2: Interfaz web
+## 🔹 opción 2: interfaz web (recomendada)
 
 ```bash
-streamlit run app.py
+py -3.13 -m streamlit run app.py
 ```
 
-Luego abrir en el navegador:
+Luego abrir en navegador:
 
-```text
+```
 http://localhost:8501
 ```
 
 ---
-
-# 💬 Ejemplos de consultas
-
-```text
-¿Cuánto cuesta enviar un paquete de 3 kg a Punta Arenas?
-
-¿Qué debo hacer si mi paquete llegó dañado?
-
-Mi envío lleva más de 10 días sin actualizar estado.
-
-¿Existe servicio express para Santiago?
-
-¿Cuánto demora un envío a regiones?
-
-Quiero enviar un sobre de 400 gramos a Arica.
+ 
+## 🔹 opción 3: dashboard de observabilidad
+ 
+Con la app corriendo, hacer clic en **"dashboard"** en el menú lateral de Streamlit.
+ 
+O acceder directamente:
+ 
 ```
+http://localhost:8501/dashboard
+```
+ 
+> El dashboard requiere haber hecho al menos una consulta en el chat para generar `logs/metricas.jsonl`.
+---
+
+# 💬 Ejemplos de preguntas
+
+* que hago si mi paquete llega dañado
+* cuanto demora un envio
+* cuanto cuesta enviar un paquete
+* puedo enviar alimentos
 
 ---
 
-# 🛠️ Tecnologías utilizadas
+# 🛠️ Tecnologías usadas
 
-* Python 3.13
-* LangChain
-* AgentExecutor
-* ChromaDB
-* GPT-4o-mini
-* GitHub Models
-* Streamlit
-* Python-dotenv
-
----
-
-# 📌 Características principales
-
-* Selección automática de herramientas.
-* Arquitectura basada en agentes.
-* Recuperación de información mediante RAG.
-* Memoria conversacional de corto plazo.
-* Memoria persistente entre sesiones.
-* Base vectorial utilizando ChromaDB.
-* Interfaz web para interacción con usuarios.
-
+* python 3.13
+* langchain
+* chromadb
+* openai (via github models)
+* streamlit
