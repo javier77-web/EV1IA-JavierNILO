@@ -45,7 +45,6 @@ def registrar_ejecucion(
         f.write(json.dumps(registro, ensure_ascii=False) + "\n")
     return registro
 
-
 # ─── Decorador para medir latencia de herramientas ───────────────
 def medir_latencia(nombre_herramienta: str):
     """
@@ -83,7 +82,6 @@ def medir_latencia(nombre_herramienta: str):
             return resultado
         return wrapper
     return decorator
-
 
 # ─── Medición manual (para usar en app.py alrededor del agente) ──
 class MedidorEjecucion:
@@ -129,7 +127,6 @@ class MedidorEjecucion:
         )
         return False  # no suprimir excepciones
 
-
 # ─── Carga y resumen de métricas ─────────────────────────────────
 def cargar_logs() -> list[dict]:
     """Retorna todos los registros del archivo JSONL como lista de dicts."""
@@ -145,7 +142,6 @@ def cargar_logs() -> list[dict]:
                 except json.JSONDecodeError:
                     continue
     return registros
-
 
 def calcular_metricas_resumen(registros: list[dict]) -> dict:
     """

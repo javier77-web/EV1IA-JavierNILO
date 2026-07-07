@@ -1,32 +1,10 @@
-"""
-agent.py — Agente funcional Starken (compatible LangChain 0.3.25)
-
-Arquitectura:
-    LCEL Agent (LangChain Expression Language)
-        ├── LLM        : gpt-4o-mini via GitHub Models (bind_tools)
-        ├── Tools      : buscar_informacion, calcular_tarifa, registrar_reclamo
-        ├── Memory CP  : historial de mensajes en sesión
-        ├── Memory LP  : ChromaDB persistente (sesiones anteriores)
-        └── Prompt     : system prompt con rol + contexto histórico
-"""
-
 import os
 from dotenv import load_dotenv
-
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from langchain_core.runnables import RunnableLambda
-
+from langchain_core.messages import HumanMessage, ToolMessage, SystemMessage
 from tools import TOOLS
-from memory import (
-    crear_memoria_corto_plazo,
-    guardar_en_memoria_larga,
-    recuperar_contexto_largo_plazo,
-    inicializar_base_conocimiento,
-)
+from memory import inicializar_base_conocimiento
 
-# CONFIGURACION
 load_dotenv()
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -36,7 +14,6 @@ if not GITHUB_TOKEN:
 os.environ["OPENAI_API_KEY"] = GITHUB_TOKEN
 os.environ["OPENAI_API_BASE"] = "https://models.inference.ai.azure.com"
 
-# PROMPT SYSTEM DEL AGENTE
 SYSTEM_PROMPT = """Eres el asistente virtual inteligente de Starken, empresa líder de courier en Chile.
 
 Tu misión es ayudar a los clientes con:
@@ -49,23 +26,18 @@ REGLAS DE COMPORTAMIENTO:
 1. Siempre usa las herramientas disponibles antes de responder. No inventes información.
 2. Si el usuario pregunta por un costo o tarifa → usa la herramienta calcular_tarifa.
 3. Si el usuario reporta un problema o reclamo → usa registrar_reclamo.
-4. Para cualquier consulta sobre políticas o procedimientos → usa buscar_informacion.
+4. Para cualquier consulta sobre políticas, horarios, plazos, seguimiento o procedimientos → usa buscar_informacion.
 5. Si una pregunta no está relacionada con Starken, responde amablemente que solo puedes ayudar con temas de la empresa.
-6. Mantén un tono profesional pero cercano. Usa el contexto de la conversación para dar respuestas coherentes.
+6. Si buscar_informacion entrega contexto relevante, responde usando exclusivamente esa información.
+7. Si el contexto no es suficiente, dilo brevemente y pide el dato faltante.
+8. Si la herramienta devuelve información útil sobre plazos, horarios o restricciones, no digas que no existe información.
 
 {contexto_largo_plazo}
 """
 
-# MAPA DE HERRAMIENTAS por nombre
 TOOLS_MAP = {tool.name: tool for tool in TOOLS}
 
-
 class AgenteStarken:
-    """
-    Agente compatible con LangChain 0.3.25 usando LCEL + bind_tools.
-    Reemplaza AgentExecutor con un loop manual de tool-calling.
-    """
-
     def __init__(self, contexto_largo_plazo: str = ""):
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
@@ -79,34 +51,28 @@ class AgenteStarken:
         )
 
     def invoke(self, inputs: dict) -> dict:
-        """
-        Procesa una pregunta ejecutando el loop de razonamiento:
-        LLM → tool calls → LLM → respuesta final.
-        """
         pregunta = inputs.get("input", "")
         chat_history = inputs.get("chat_history", [])
 
-        # Construir mensajes
-        from langchain_core.messages import SystemMessage
         mensajes = [SystemMessage(content=self.system_prompt)]
         mensajes += chat_history
         mensajes.append(HumanMessage(content=pregunta))
 
         intermediate_steps = []
         max_iterations = 5
+        ultima_respuesta = None
 
         for _ in range(max_iterations):
             respuesta = self.llm.invoke(mensajes)
+            ultima_respuesta = respuesta
             mensajes.append(respuesta)
 
-            # Si no hay tool calls → respuesta final
             if not respuesta.tool_calls:
                 break
 
-            # Ejecutar cada herramienta solicitada
             for tc in respuesta.tool_calls:
                 nombre = tc["name"]
-                args   = tc["args"]
+                args = tc["args"]
                 tool_id = tc["id"]
 
                 tool = TOOLS_MAP.get(nombre)
@@ -119,35 +85,41 @@ class AgenteStarken:
                     resultado = f"[Herramienta '{nombre}' no encontrada]"
 
                 intermediate_steps.append((nombre, resultado))
-                mensajes.append(
-                    ToolMessage(content=str(resultado), tool_call_id=tool_id)
-                )
+                mensajes.append(ToolMessage(content=str(resultado), tool_call_id=tool_id))
 
-        output = respuesta.content if hasattr(respuesta, "content") else str(respuesta)
+        output = ultima_respuesta.content if ultima_respuesta and hasattr(ultima_respuesta, "content") else ""
+        output_final = output
+
+        if any(nombre == "buscar_informacion" for nombre, _ in intermediate_steps):
+            contexto_recuperado = "\n\n".join(
+                str(resultado) for nombre, resultado in intermediate_steps if nombre == "buscar_informacion"
+            )
+            if contexto_recuperado and "No encontré coincidencias exactas" not in contexto_recuperado:
+                mensajes.append(HumanMessage(
+                    content=(
+                        "Redacta una respuesta final breve, clara y directa usando exclusivamente "
+                        "la información entregada por buscar_informacion. No digas que no tienes datos."
+                    )
+                ))
+                respuesta_final = self.llm.invoke(mensajes)
+                output_final = respuesta_final.content if hasattr(respuesta_final, "content") else str(respuesta_final)
 
         return {
-            "output": output,
+            "output": output_final,
             "intermediate_steps": intermediate_steps,
         }
 
-
-# CONSTRUCCION DEL AGENTE
-def crear_agente(contexto_largo_plazo: str = "") -> AgenteStarken:
-    """Retorna una instancia del agente Starken."""
+def crear_agente(contexto_largo_plazo: str = ""):
     return AgenteStarken(contexto_largo_plazo=contexto_largo_plazo)
 
-
-# FUNCION PRINCIPAL: procesar pregunta
-def procesar_pregunta(executor: AgenteStarken, pregunta: str) -> dict:
-    """
-    Procesa la pregunta del usuario con el agente.
-    Retorna dict con: respuesta, herramientas_usadas, pasos_intermedios.
-    """
-    resultado = executor.invoke({"input": pregunta, "chat_history": []})
+def procesar_pregunta(executor: AgenteStarken, pregunta: str, chat_history=None) -> dict:
+    resultado = executor.invoke({
+        "input": pregunta,
+        "chat_history": chat_history or []
+    })
 
     respuesta = resultado.get("output", "No pude generar una respuesta.")
 
-    # extraer herramientas usadas (sin duplicados)
     herramientas_usadas = []
     for nombre, _ in resultado.get("intermediate_steps", []):
         if nombre not in herramientas_usadas:
@@ -159,13 +131,10 @@ def procesar_pregunta(executor: AgenteStarken, pregunta: str) -> dict:
         "pasos_intermedios": len(resultado.get("intermediate_steps", []))
     }
 
-
-# MAIN — prueba en consola
 if __name__ == "__main__":
-
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  AGENTE STARKEN — Prueba en consola")
-    print("="*60)
+    print("=" * 60)
 
     ruta = os.path.dirname(__file__)
     print("\n[1/2] Inicializando base de conocimiento...")
@@ -177,44 +146,18 @@ if __name__ == "__main__":
     print("[ok] Agente listo.\n")
 
     casos_prueba = [
-        {
-            "pregunta": "Hola, necesito enviar un paquete de 3 kg a Punta Arenas a domicilio, ¿cuánto me cuesta?",
-            "descripcion": "→ debe usar: calcular_tarifa"
-        },
-        {
-            "pregunta": "¿Qué hago si mi paquete llegó dañado?",
-            "descripcion": "→ debe usar: buscar_informacion + registrar_reclamo"
-        },
-        {
-            "pregunta": "Mi paquete no ha llegado y ya pasaron 10 días desde que lo despacharon a Temuco",
-            "descripcion": "→ debe usar: registrar_reclamo"
-        },
-        {
-            "pregunta": "¿Tienen servicio express? Necesito que llegue mañana a Santiago",
-            "descripcion": "→ debe usar: buscar_informacion"
-        },
-        {
-            "pregunta": "Hace un momento me dijiste el precio para Punta Arenas, ¿ese precio incluye seguro?",
-            "descripcion": "→ demuestra memoria de corto plazo"
-        },
+        "¿Tienen servicio express? Necesito que llegue mañana a Santiago",
+        "¿Qué hago si mi paquete llegó dañado?",
+        "¿Cuánto cuesta enviar 3 kg a Punta Arenas a domicilio?",
     ]
 
-    for i, caso in enumerate(casos_prueba, 1):
-        print(f"\n{'─'*60}")
-        print(f"CASO {i}: {caso['descripcion']}")
-        print(f"Pregunta: {caso['pregunta']}")
-        print("─"*60)
+    for i, pregunta in enumerate(casos_prueba, 1):
+        print(f"\n{'─' * 60}")
+        print(f"CASO {i}")
+        print(f"Pregunta: {pregunta}")
+        print("─" * 60)
 
-        resultado = procesar_pregunta(executor, caso["pregunta"])
-
+        resultado = procesar_pregunta(executor, pregunta)
         print(f"\nRESPUESTA:\n{resultado['respuesta']}")
         print(f"\nHerramientas usadas: {resultado['herramientas_usadas']}")
         print(f"Pasos de razonamiento: {resultado['pasos_intermedios']}")
-
-    resumen = (
-        "Sesión de prueba: cliente consultó sobre tarifa a Punta Arenas (3kg), "
-        "paquete dañado, paquete perdido a Temuco, servicio express y seguros."
-    )
-    guardar_en_memoria_larga(resumen, {"sesion": "prueba_consola"})
-    print("\n\n[ok] Resumen guardado en memoria de largo plazo.")
-    print("="*60)
